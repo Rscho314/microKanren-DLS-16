@@ -44,47 +44,13 @@
     (let ((s (unify (find u s) (find v s) s)))
       (if s (list `(,s . ,(cdr s/c))) `()))))
 
-((== '#t 'z) '(() . 0))
-'()
-((== '#t '#t) '(() . 0))
-'((() . 0))
-((== '(#t . #f) '(#t . #f)) '(() . 0))
-'((() . 0))
-
 #| (Var → Goal) → Goal |#
 (define ((call/fresh f) s/c)
   (let ((c (cdr s/c)))
     ((f (var c)) `(,(car s/c) . ,(+ c 1)))))
 
-((call/fresh
-    (λ (x) 
-       (== x 'a)))
-   '(() . 0))
-'((((0 . a)) . 1))
-
 (define-syntax-rule (define-relation (defname . args) g)
   (define ((defname . args) s/c) (delay/name (g s/c))))
-
-(define-relation (append l s o)
-  (conde
-    ((== '() l) (== s o))
-    ((fresh (a d)
-       (== `(,a . ,d) l)
-       (fresh (r)
-         (== `(,a . ,r) o)
-         (append d s r))))))
-
-(define-relation (peano n)
-  (disj
-    (== n 'z)
-    (call/fresh 
-      (λ (r)
-        (conj
-          (== n `(s ,r))
-          (peano r))))))
-
-(define-relation (unproductive n)
-  (unproductive n))
 
 (define ($append $1 $2)
   (cond
@@ -104,31 +70,6 @@
 
 #| Goal × Goal → Goal |#
 (define ((conj g1 g2) s/c) ($append-map g2 (g1 s/c)))
- ((disj 
-     (call/fresh 
-       (λ (x) 
-         (== 'z x)))
-     (call/fresh 
-       (λ (x) 
-         (== '(s z) x))))
-   '(() . 0))
-'((((0 . z)) . 1) (((0 . (s z))) . 1))
-
-((call/fresh 
-   (λ (x) 
-     (call/fresh
-       (λ (y) 
-         (conj 
-           (== y x)
-           (== 'z x))))))
- '(() . 0))
-'((((0 . z) (1 . 0)) . 2))
-
-
-((call/fresh
-   (λ (n)
-     (peano n)))
- '(() . 0))
 
 #| Maybe Nat⁺ × Goal→ Mature |#
 (define (call/initial-state n g) 
@@ -143,63 +84,9 @@
     ((null? $) '())
     ((and n (zero? (- n 1))) (list (car $)))
     (else (cons (car $) 
-            (take (and n (- n 1)) (pull (cdr $)))))))
+                (take (and n (- n 1)) (pull (cdr $)))))))
 
-(call/initial-state 2
-    (call/fresh
-      (λ (n)
-        (peano n))))
-'((((0 . z)) . 1) (((1 . z) (0 . (s 1))) . 2))
-
-(call/initial-state 1
-  (call/fresh
-    (λ (n)
-      (disj 
-        (unproductive n)
-        (peano n)))))
-
-(define-relation (church n)
-  (call/fresh 
-    (λ (b)
-      (conj
-        (== n `(λ (s) (λ (z) ,b)))
-        (peano b)))))
-
- (call/initial-state 3
-    (call/fresh
-      (λ (n)
-       (disj
-         (peano n)
-         (church n)))))
-'((((0 . z)) . 1)
-  (((1 . z) (0 . (s 1))) . 2)
-  (((1 . z) (0 . (λ (s) (λ (z) 1)))) . 2))
-
-(define (desugared-append l s o)
-  (λ (s/c)
-    (delay/name
-      ((disj
-         (conj 
-           (== l '())
-           (== s o))
-         (call/fresh
-           (λ (a)
-             (call/fresh 
-               (λ (d)
-                 (conj 
-                   (== l `(,a . ,d))
-                   (call/fresh 
-                     (λ (r)
-                       (conj 
-                         (== o `(,a . ,r))
-                         (desugared-append d s r))))))))))
-       s/c)))) 
-
- (call/initial-state #f
-    (call/fresh
-      (λ (q)
-        (desugared-append '(t u v) '(w x) q))))
-
+#| Impure extensions & MiniKanren recovery |#
 (define ((ifte g0 g1 g2) s/c)
   (let loop (($ (g0 s/c)))
     (cond
@@ -207,24 +94,12 @@
       ((promise? $) (delay/name (loop (force $))))
       (else ($append-map g1 $)))))
 
-(call/initial-state #f
-   (call/fresh
-     (λ (q)
-       (ifte (== 'a 'b) (== q 'a) (== q 'b)))))
-'((((0 . b)) . 1))
-
 (define ((once g) s/c)
   (let loop (($ (g s/c)))
     (cond
       ((null? $) '())
       ((promise? $) (delay/name (loop (force $))))
       (else (list (car $))))))
-
-(call/initial-state #f
-   (call/fresh
-     (λ (q)
-       (once (peano q)))))
-'((((0 . z)) . 1))
 
 (define-syntax disj+
   (syntax-rules ()
@@ -280,22 +155,182 @@
   (map project-var0 
     (call/initial-state n (fresh (q) g0 g ...))))
 
-(map project-var0
-   (call/initial-state #f
-     (call/fresh
-       (λ (q)
+
+(module+ test
+  (require rackunit)
+
+  (define-relation (append l s o)
+    (conde
+     ((== '() l) (== s o))
+     ((fresh (a d)
+             (== `(,a . ,d) l)
+             (fresh (r)
+                    (== `(,a . ,r) o)
+                    (append d s r))))))
+  
+  (define-relation (peano n)
+    (disj
+     (== n 'z)
+     (call/fresh 
+      (λ (r)
+        (conj
+         (== n `(s ,r))
+         (peano r))))))
+  
+  (define-relation (unproductive n) ; loops forever
+    (unproductive n))
+  
+  (define-relation (church n)
+    (call/fresh 
+     (λ (b)
+       (conj
+        (== n `(λ (s) (λ (z) ,b)))
+        (peano b)))))
+  
+  (define (desugared-append l s o)
+    (λ (s/c)
+      (delay/name
+       ((disj
+         (conj 
+          (== l '())
+          (== s o))
          (call/fresh
-           (λ (l)
-             (call/fresh
-               (λ (s)
-                 (conj
-                   (== `(,l ,s) q) 
-                   (append l s '(t u v w x)))))))))))
+          (λ (a)
+            (call/fresh 
+             (λ (d)
+               (conj 
+                (== l `(,a . ,d))
+                (call/fresh 
+                 (λ (r)
+                   (conj 
+                    (== o `(,a . ,r))
+                    (desugared-append d s r))))))))))
+        s/c))))
 
-(run #f (q) (append '(t u v) '(w x) q))
-'((t u v w x))
+  (check-equal? ((== '#t 'z) '(() . 0))
+                '())
+  (check-equal? ((== '#t '#t) '(() . 0))
+                '((() . 0)))
+  (check-equal? ((== '(#t . #f) '(#t . #f)) '(() . 0))
+                '((() . 0)))
+  
+  (check-equal? ((call/fresh
+                  (λ (x) 
+                    (== x 'a)))
+                 '(() . 0))
+                '((((0 . a)) . 1)))
+  
+  (check-equal? ((disj 
+                  (call/fresh 
+                   (λ (x) 
+                     (== 'z x)))
+                  (call/fresh 
+                   (λ (x) 
+                     (== '(s z) x))))
+                 '(() . 0))
+                '((((0 . z)) . 1) (((0 . (s z))) . 1)))
+  
+  (check-equal? ((call/fresh 
+                  (λ (x) 
+                    (call/fresh
+                     (λ (y) 
+                       (conj 
+                        (== y x)
+                        (== 'z x))))))
+                 '(() . 0))
+                '((((0 . z) (1 . 0)) . 2)))
 
-(run #f (q) (append '(t u v) q '(t u v w x)))
-'((w x))
 
-(run #f (q) (fresh (l s) (== `(,l ,s) q) (append l s '(t u v w x))))
+  (check-equal? (promise? ((call/fresh
+                            (λ (n)
+                              (peano n)))
+                           '(() . 0)))
+                #t)
+  
+  (check-equal? (call/initial-state 1
+                                    (call/fresh
+                                     (λ (n)
+                                       (disj 
+                                        (unproductive n)
+                                        (peano n)))))
+                '((((0 . z)) . 1)))
+
+  (check-equal? (call/initial-state 2
+                                    (call/fresh
+                                     (λ (n)
+                                       (peano n))))
+                '((((0 . z)) . 1) (((1 . z) (0 . (s 1))) . 2)))
+
+  (check-equal? (run 1 (q) (church q))
+                '((λ (s) (λ (z) z))))
+  
+  (check-equal? (call/initial-state 3
+                                    (call/fresh
+                                     (λ (n)
+                                       (disj
+                                        (peano n)
+                                        (church n)))))
+                '((((0 . z)) . 1)
+                  (((1 . z) (0 . (s 1))) . 2)
+                  (((1 . z) (0 . (λ (s) (λ (z) 1)))) . 2)))
+  
+  (check-equal? (call/initial-state #f
+                                    (call/fresh
+                                     (λ (q)
+                                       (desugared-append '(t u v) '(w x) q))))
+                '((((9 w x)
+                    (6 7 . 9)
+                    (8)
+                    (7 . v)
+                    (3 4 . 6)
+                    (5 v)
+                    (4 . u)
+                    (0 1 . 3)
+                    (2 u v)
+                    (1 . t))
+                   .
+                   10)))
+  
+  (check-equal? (call/initial-state #f
+                                    (call/fresh
+                                     (λ (q)
+                                       (ifte (== 'a 'b) (== q 'a) (== q 'b)))))
+                '((((0 . b)) . 1)))
+  
+  (check-equal? (call/initial-state #f
+                                    (call/fresh
+                                     (λ (q)
+                                       (once (peano q)))))
+                '((((0 . z)) . 1)))
+  
+  (check-equal? (map project-var0
+                     (call/initial-state #f
+                                         (call/fresh
+                                          (λ (q)
+                                            (call/fresh
+                                             (λ (l)
+                                               (call/fresh
+                                                (λ (s)
+                                                  (conj
+                                                   (== `(,l ,s) q) 
+                                                   (append l s '(t u v w x)))))))))))
+                '((() (t u v w x))
+                  ((t) (u v w x))
+                  ((t u) (v w x))
+                  ((t u v) (w x))
+                  ((t u v w) (x))
+                  ((t u v w x) ())))
+  
+  (check-equal? (run #f (q) (append '(t u v) '(w x) q))
+                '((t u v w x)))
+  
+  (check-equal? (run #f (q) (append '(t u v) q '(t u v w x)))
+                '((w x)))
+  
+  (check-equal? (run #f (q) (fresh (l s) (== `(,l ,s) q) (append l s '(t u v w x))))
+                '((() (t u v w x))
+                  ((t) (u v w x))
+                  ((t u) (v w x))
+                  ((t u v) (w x))
+                  ((t u v w) (x))
+                  ((t u v w x) ()))))

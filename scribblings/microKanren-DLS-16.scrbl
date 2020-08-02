@@ -1,10 +1,10 @@
 #lang scribble/manual
-@require[@for-label[test
+@require[@for-label[microKanren-DLS-16
                     racket/base]]
 
-@title{test}
+@title{microKanren-DLS-16}
 @author{raoul}
 
-@defmodule[test]
+@defmodule[microKanren-DLS-16]
 
 Package Description Here
